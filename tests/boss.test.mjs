@@ -6,7 +6,7 @@ import { generateOpponent } from '../js/game/bot.js';
 import { validateSnapshot } from '../js/sim/snapshot.js';
 import { makeFighter, simulate } from '../js/sim/battle.js';
 import { lineOf } from '../js/ui/records.js';
-import { BOSS_POOL, BOSS_BST, WIN_TARGET } from '../js/config.js';
+import { BOSS_POOL, BOSS_BST, WIN_TARGET, VITAMIN } from '../js/config.js';
 import { POKEMON } from '../js/data/pokemon.js';
 
 test('보스: 런 시드로 정해지고, 풀의 4마리가 모두 나옴', () => {
@@ -39,7 +39,8 @@ test('보스 상대: 전설, 첫 번째 특성, 종족값 합 600으로 보정, 
     const raw = makeFighter('B', { ...snap, boss: undefined });
     assert.ok(f.maxHp < raw.maxHp && f.atk < raw.atk);
     assert.equal(f.build.pokemon.bst, BOSS_BST);
-    const sum = Object.values(f.build.pokemon.stats).reduce((a, b) => a + b, 0);
+    const vitamins = Object.values(snap.boosts ?? {}).reduce((a, b) => a + b, 0) * VITAMIN.amount;   // 영양제는 보정 뒤에 더함
+    const sum = Object.values(f.build.pokemon.stats).reduce((a, b) => a + b, 0) - vitamins;
     assert.ok(Math.abs(sum - BOSS_BST) <= 3, `합 ${sum}`);
   }
   assert.deepEqual(validateSnapshot({ ...generateOpponent({ seed: 0, round: 11, wins: 9 }), boss: 'yes' }).length, 1);

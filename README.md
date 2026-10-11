@@ -35,4 +35,5 @@ node tools/balance.mjs                        # 밸런스 보고서 (약 2분)
 - 게임 데이터: [PokeAPI](https://github.com/PokeAPI/pokeapi) CSV (빌드할 때만 사용)
 - 포켓몬 스프라이트·초상화: [PMD SpriteCollab](https://github.com/PMDCollab/SpriteCollab) (CC BY-NC 4.0). 실행 중 jsDelivr로 불러옵니다. 제작자 목록은 게임의 "정보 / 설정" 화면에 있습니다.
 - 도구 아이콘(`assets/items/`): [PokeAPI/sprites](https://github.com/PokeAPI/sprites), 일부는 Pokémon Showdown 아이콘 시트에서 잘라 씀. 원작 그림이므로 권리자 요청이 있으면 지웁니다 (지워도 글자 아이콘으로 동작).
+- 글꼴: [갈무리(Galmuri)](https://github.com/quiple/galmuri) (SIL OFL 1.1). 실행 중 jsDelivr로 불러옵니다.
 - 효과음은 Web Audio로 합성하며, 원작 음악은 쓰지 않습니다.

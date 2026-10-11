@@ -138,7 +138,7 @@ SHAPES = {
 }
 GRADES = {1: 'common', 2: 'common', 3: 'uncommon', 4: 'rare', 5: 'epic', 6: 'legendary'}
 
-# §10.2 MVP 도구 + §2.3 진화 도구 (68개)
+# §10.2 MVP 도구 + §2.3 진화 도구 + §10.4 영양제
 MVP_ITEMS = [
     'charcoal', 'mystic-water', 'magnet', 'miracle-seed', 'never-melt-ice', 'black-belt',
     'poison-barb', 'soft-sand', 'sharp-beak', 'twisted-spoon', 'silver-powder', 'hard-stone',
@@ -151,7 +151,8 @@ MVP_ITEMS = [
     'occa-berry', 'passho-berry', 'wacan-berry', 'rindo-berry', 'yache-berry', 'chople-berry',
     'kebia-berry', 'shuca-berry', 'coba-berry', 'payapa-berry', 'tanga-berry', 'charti-berry',
     'kasib-berry', 'haban-berry', 'colbur-berry', 'babiri-berry', 'roseli-berry', 'chilan-berry',
-    'rare-candy', 'thunder-stone', 'linking-cord', 'soothe-bell', 'oval-stone',
+    'rare-candy', 'thunder-stone', 'linking-cord', 'soothe-bell', 'oval-stone', 'shiny-stone', 'dawn-stone',
+    'hp-up', 'protein', 'iron', 'calcium', 'zinc', 'carbos',   # 영양제 (§10.4)
 ]
 ITEM_NAME_FALLBACK = {'roseli-berry': '로셀열매'}   # PokeAPI에 한국어 이름이 없음
 SHOWDOWN_ICONS = {'covert-cloak': 750, 'fairy-feather': 754}   # §1.1 시트 칸 번호

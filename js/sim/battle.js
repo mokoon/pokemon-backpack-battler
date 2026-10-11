@@ -1,7 +1,7 @@
 // 전투 시뮬레이터 (DESIGN §6, §11). 순수 모듈: Math.random, Date.now, DOM 금지.
 import {
   HP_MUL, HP_BASE_ADD, hpScale, SPEED_ADD, SPEED_DIV, PRIORITY_START_CHARGE, DMG_K, STAT_ADD, STAB,
-  CRIT_MULT, CRIT_CHANCE, MULTI_HIT_2_5, TICK_MS, TIME_LIMIT_MS, RECHARGE_HALT_MS,
+  CRIT_MULT, CRIT_CHANCE, WEATHER_MS, UPGRADE, MULTI_HIT_2_5, TICK_MS, TIME_LIMIT_MS, RECHARGE_HALT_MS,
   BURN_PHYS_MULT, CONFUSION_CHANCE, CONFUSION_POWER, AILMENT_CHANCE_DIV, AILMENT_MAP, FLINCH_DIV,
   WEATHER_BOOST, WEATHER_WEAKEN, WEATHER_DEF_MULT, PROTECT_MULT, SCREEN_MULT, CHARGE_COOL_MUL, ITEM, ABILITY,
 } from '../config.js';
@@ -10,7 +10,7 @@ import { createRng } from './rng.js';
 import { validateSnapshot, resolveBuild } from './snapshot.js';
 import {
   initEffects, stage, stageMul, addStages, clearStages, addStatus, clearStatus, chargeMul, hasAnyStatus,
-  accuracyMod, noGuard, tickTimers, tickWeather, tickDot, heal, useStatusMove, checkHpBerries,
+  accuracyMod, noGuard, tickTimers, tickWeather, tickDot, heal, useStatusMove, checkHpBerries, inflict,
 } from './effects.js';
 import { setupItems, takeOnce } from './items.js';
 import { ABILITIES, battleAbility } from '../rules/abilities.js';
@@ -39,13 +39,20 @@ export function makeFighter(side, snap) {
     moves: build.moves.map((m, order) => ({
       ...m,
       order,
-      coolMs: Math.round(m.move.cool * 1000),
+      move: upgradedMove(m.move, m.lv ?? 0),
+      coolMs: Math.round((m.move.cool * 1000) / (m.move.class === 'status' ? 1 + UPGRADE.statusCharge * (m.lv ?? 0) : 1)),
       charge: PRIORITY_START_CHARGE[Math.min(m.move.priority, 3)] ?? 0,   // 0~1
     })),
   };
   initEffects(f);
   setupItems(f);
   return f;
+}
+
+// 강화된 기술 (§10.3): 공격기는 1회 위력 +20%씩, 변화기는 충전이 빨라진다(coolMs에서 처리)
+function upgradedMove(move, lv) {
+  if (!lv || move.class === 'status') return move;
+  return { ...move, power1: Math.round(move.power1 * (1 + UPGRADE.movePower * lv)) };
 }
 
 export function typeFactor(moveType, defTypes) {
@@ -74,12 +81,14 @@ export function calcDamage(user, target, move, { crit = false, ctx = null, guard
   const guts = user.ability === 'guts' && hasAnyStatus(user);
   if (phys && user.status.burn > 0 && !guts) mul *= BURN_PHYS_MULT;
   if (guts && phys) mul *= ABILITY.gutsMult;
+  if (user.ability === 'hustle' && phys) mul *= ABILITY.hustleMult;
   const pinch = ABILITIES[user.ability]?.pinchType;
   if (pinch && move.type === pinch && user.hp <= user.maxHp * ABILITY.pinchAt) mul *= ABILITY.pinchMult;
   if (user.ability === 'solar-power' && !phys && ctx?.weather?.type === 'sun') mul *= ABILITY.solarPower;
   // 특성 (받는 쪽): 멀티스케일, 이상한비늘
   if (target.ability === 'multiscale' && target.hp === target.maxHp) mul *= ABILITY.multiscale;
   if (target.ability === 'marvel-scale' && phys && hasAnyStatus(target)) mul *= ABILITY.marvelScale;
+  if (target.ability === 'thick-fat' && (move.type === 'fire' || move.type === 'ice')) mul *= ABILITY.thickFat;
   // 도구: 피해 보너스는 더하고(달인의띠 포함), 받는 피해 감소는 곱한다
   mul *= Math.max(0, 1 + bonus + (eff > 1 ? user.item.expertBelt : 0));
   mul *= target.item.allTaken * (phys ? 1 : target.item.specialTaken) * extra;
@@ -111,7 +120,8 @@ function accuracyHits(ctx, user, target, slot) {
   const { move, id } = slot;
   const w = ctx.weather?.type;
   if (!move.accuracy || noGuard(user) || (id === 'thunder' && w === 'rain') || (id === 'blizzard' && w === 'snow')) return true;
-  return ctx.rng.chance((move.accuracy + slot.accBonus + accuracyMod(ctx, user, target)) / 100);
+  const hustle = user.ability === 'hustle' && move.class === 'physical' ? ABILITY.hustleAcc : 1;   // 의욕: 물리 명중률 ×0.8
+  return ctx.rng.chance(((move.accuracy + slot.accBonus + accuracyMod(ctx, user, target)) * hustle) / 100);
 }
 
 // 공격 피해를 대타출동이 먼저 받는다. 옹골참: HP 가득에서 쓰러질 피해면 1 남김 (전투당 1번, 기합의띠와 따로)
@@ -126,8 +136,8 @@ function applyHit(ctx, target, damage) {
     target.hp = 1;
     ctx.events.push({ t: ctx.t, side: target.side, type: 'ability', ability: 'sturdy' });
   }
-  if (target.hp <= 0 && target.sash && before >= target.maxHp * ITEM.sashMinHp) {
-    target.sash = false;
+  if (target.hp <= 0 && target.sash > 0 && before >= target.maxHp * ITEM.sashMinHp) {
+    target.sash--;
     target.hp = 1;
     ctx.events.push({ t: ctx.t, side: target.side, type: 'item', item: 'focus-sash' });
   }
@@ -156,7 +166,9 @@ function useAttack(ctx, user, target, slot) {
   let dealt = 0;
   let landed = 0;
   for (let i = 0; i < hits; i++) {
-    const crit = rng.chance(CRIT_CHANCE[Math.min((meta?.critRate ?? 0) + slot.critBonus, 2)]);
+    // 대운: 급소 단계 +1, 조가비갑옷: 급소에 맞지 않음
+    const critStage = (meta?.critRate ?? 0) + slot.critBonus + (user.ability === 'super-luck' ? 1 : 0);
+    const crit = target.ability !== 'shell-armor' && rng.chance(CRIT_CHANCE[Math.min(critStage, 2)]);
     const eff0 = effectiveness(target, move);
     const extra = eff0 > 0 ? resistBerry(ctx, target, move, eff0) : 1;
     const { damage, eff } = calcDamage(user, target, move, { crit, ctx, guarded, bonus: slot.dmgBonus, extra });
@@ -168,6 +180,7 @@ function useAttack(ctx, user, target, slot) {
     landed++;
     // 정전기: 접촉 공격을 받을 때마다 상대 마비 3중첩
     if (target.ability === 'static' && move.flags.includes('contact')) addStatus(ctx, user, 'paralysis', ABILITY.staticStacks);
+    if (target.ability === 'poison-point' && move.flags.includes('contact')) addStatus(ctx, user, 'poison', ABILITY.poisonPointStacks);
     // 울퉁불퉁멧: 접촉 기술에 맞으면 그 피해의 일부를 반사
     if (target.item.helmet && move.flags.includes('contact')) {
       selfDamage(ctx, user, Math.max(1, Math.round(damage * target.item.helmet)), 'rocky-helmet');
@@ -176,7 +189,7 @@ function useAttack(ctx, user, target, slot) {
     const status = AILMENT_MAP[meta?.ailment];
     if (status && meta.ailmentChance > 0 && !target.item.cloak) {
       const stacks = Math.max(1, Math.round(meta.ailmentChance / AILMENT_CHANCE_DIV));
-      addStatus(ctx, target, status, stacks * (user.ability === 'serene-grace' ? ABILITY.sereneGrace : 1));
+      inflict(ctx, user, target, status, stacks * (user.ability === 'serene-grace' ? ABILITY.sereneGrace : 1));
     }
     if (move.type === 'fire') clearStatus(ctx, target, 'chill');
     if (meta?.flinchChance && !target.item.cloak) flinch(ctx, target, meta.flinchChance / FLINCH_DIV / 100);
@@ -204,6 +217,7 @@ function useAttack(ctx, user, target, slot) {
 }
 
 function selfDamage(ctx, f, damage, move) {
+  if (f.ability === 'magic-guard' && move !== 'struggle') return;   // 매직가드: 반동·생명의구슬·울퉁불퉁멧 무효 (발버둥 반동은 받음)
   f.hp -= damage;
   ctx.events.push({ t: ctx.t, side: f.side, type: 'recoil', move, damage, hp: f.hp });
 }
@@ -249,6 +263,13 @@ export function simulate(snapA, snapB, seed) {
   const ctx = { t: 0, rng: createRng(seed), events: [], weather: null };
   ctx.events.push({ t: 0, type: 'start', hp: { A: A.hp, B: B.hp }, maxHp: { A: A.maxHp, B: B.maxHp } });
   const foe = (f) => (f === A ? B : A);
+  // 모래날림: 전투 시작 시 모래바람 (§13.3)
+  for (const f of [A, B]) {
+    if (f.ability !== 'sand-stream') continue;
+    ctx.weather = { type: 'sand', until: WEATHER_MS };
+    ctx.events.push({ t: 0, side: f.side, type: 'ability', ability: 'sand-stream' });
+    ctx.events.push({ t: 0, type: 'weather', weather: 'sand', until: WEATHER_MS });
+  }
 
   while (ctx.t < TIME_LIMIT_MS) {
     ctx.t += TICK_MS;

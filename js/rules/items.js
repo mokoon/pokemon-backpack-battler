@@ -20,6 +20,7 @@ const RESIST_BERRIES = {
 const PINCH_BERRIES = {
   'liechi-berry': 'atk', 'ganlon-berry': 'def', 'salac-berry': 'spe', 'petaya-berry': 'spa', 'apicot-berry': 'spd',
 };
+const VITAMINS = { 'hp-up': 'hp', protein: 'atk', iron: 'def', calcium: 'spa', zinc: 'spd', carbos: 'spe' };
 const map = (obj, f) => Object.fromEntries(Object.entries(obj).map(([id, v]) => [id, f(v)]));
 
 export const ITEM_RULES = {
@@ -53,4 +54,8 @@ export const ITEM_RULES = {
   'linking-cord': { placeable: false },
   'soothe-bell': { placeable: false },
   'oval-stone': { placeable: false },
+  'shiny-stone': { placeable: false },
+  'dawn-stone': { placeable: false },
+  // 영양제 (§10.4): 가방에 놓지 않고 사면 바로 쓴다. stat: 올리는 종족값
+  ...map(VITAMINS, (stat) => ({ grade: 'uncommon', kind: 'vitamin', stat, consumable: true })),
 };

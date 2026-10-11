@@ -3,11 +3,11 @@
 //
 // board = {
 //   bags:    [{ uid, id: 'bag_base', x, y, rot }],            보드 위 가방 조각
-//   items:   [{ uid, id: 'move:ember' | 'item:charcoal', x, y, rot }],  보드 위 물건 (가방 밖이면 전투에 안 나감)
+//   items:   [{ uid, id: 'move:ember' | 'item:charcoal', x, y, rot, lv? }],  보드 위 물건 (가방 밖이면 전투에 안 나감). lv: 강화 단계 (§10.3)
 //   storage: [{ uid, id, rot } | null] × STORAGE_SLOTS,          보관함 (가방 조각도 둘 수 있음)
 //   nextUid,
 // }
-import { BOARD_W, BOARD_H, MAX_MOVES, STORAGE_SLOTS } from '../config.js';
+import { BOARD_W, BOARD_H, MAX_MOVES, STORAGE_SLOTS, UPGRADE } from '../config.js';
 import { cellsOf, key } from '../sim/snapshot.js';
 
 export const MSG_MOVE_LIMIT = `기술은 ${MAX_MOVES}개까지예요. 하나를 빼거나 팔아 주세요`;
@@ -155,6 +155,43 @@ export function findSpot(board, id) {
   return null;
 }
 
+// ---------- 강화 (§10.3) ----------
+
+const ownedThings = (board) => [...board.items, ...board.storage.filter(Boolean)];
+
+// 가진 기술(가방 안팎, 보관함)의 강화 단계. 없으면 null
+export function moveLevel(board, id) {
+  const t = ownedThings(board).find((x) => x.id === id);
+  return t ? t.lv ?? 0 : null;
+}
+
+// 가진 기술을 +1. 최대면 실패
+export function upgradeMove(board, id) {
+  const lv = moveLevel(board, id);
+  if (lv === null) return { ok: false, error: '가지고 있지 않은 기술이에요' };
+  if (lv >= UPGRADE.moveMaxLv) return { ok: false, error: `이미 최대 강화(+${UPGRADE.moveMaxLv})예요` };
+  const next = structuredClone(board);
+  ownedThings(next).find((x) => x.id === id).lv = lv + 1;
+  return { ok: true, board: next, lv: lv + 1 };
+}
+
+// 같은 지닌 도구(보통)가 itemMerge개 이상이면 하나를 도구+로 만들고 나머지를 없앤다.
+// 남길 것: 가방 위(전투에 나가는) 것 중 keepUid 우선. 없앨 것: 보관함 → 가방 밖 → 가방 위 순서
+export function mergeItems(board, id, keepUid = null) {
+  const bagCells = bagCellSet(board);
+  const rank = (t) => (board.storage.includes(t) ? 0 : isActive(board, t, bagCells) ? 2 : 1);
+  const plain = ownedThings(board).filter((t) => t.id === id && !t.lv);
+  if (!id.startsWith('item:') || plain.length < UPGRADE.itemMerge) return null;
+  const sorted = [...plain].sort((a, b) => rank(b) - rank(a) || (b.uid === keepUid) - (a.uid === keepUid));
+  const keep = sorted[0];
+  const gone = sorted.slice(1, UPGRADE.itemMerge).map((t) => t.uid);
+  const next = structuredClone(board);
+  next.items = next.items.filter((t) => !gone.includes(t.uid));
+  next.storage = next.storage.map((t) => (t && gone.includes(t.uid) ? null : t));
+  next.items.concat(next.storage.filter(Boolean)).find((t) => t.uid === keep.uid).lv = 1;
+  return next;
+}
+
 // 판매 등으로 없앤다
 export function remove(board, uid) {
   const next = structuredClone(board);
@@ -165,6 +202,6 @@ export function remove(board, uid) {
 
 // 전투 입력 스냅샷 (§11.4): 가방 조각 전부 + 가방 위 물건만
 export function toSnapshot(board, { species, ability, round }) {
-  const strip = ({ id, x, y, rot }) => ({ id, x, y, rot });
+  const strip = ({ id, x, y, rot, lv }) => (lv ? { id, x, y, rot, lv } : { id, x, y, rot });
   return { v: 1, species, ability, round, bags: board.bags.map(strip), items: activeItems(board).map(strip) };
 }

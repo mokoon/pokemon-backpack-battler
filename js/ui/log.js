@@ -1,7 +1,7 @@
 // 전투 이벤트 → 한국어 한 줄 (전투 화면과 tools/fight.mjs가 같이 쓴다). DOM 없음.
 import { STATUS_NAME, STAT_NAME, WEATHER_NAME, moveName, thingName, abilityName, josa } from './labels.js';
 
-const SOURCE = { poison: '독', burn: '화상', sand: '모래바람', 'leech-seed': '씨뿌리기', fatigue: '피로', 'solar-power': '선파워', 'rain-dish': '젖은접시' };
+const SOURCE = { poison: '독', burn: '화상', sand: '모래바람', 'leech-seed': '씨뿌리기', fatigue: '피로', 'solar-power': '선파워', 'rain-dish': '젖은접시', 'ice-body': '아이스바디' };
 const sourceName = (id) => SOURCE[id] ?? (id === 'struggle' ? '발버둥' : thingName(`item:${id}`) !== id ? thingName(`item:${id}`) : moveName(id));
 const sec = (ms) => (ms / 1000).toFixed(1);
 
@@ -25,10 +25,13 @@ export function eventText(e, who, maxHp) {
     case 'recoil': return `  ${me} ${sourceName(e.move)} 반동 ${e.damage}  HP ${hp(e.side, e.hp)}`;
     case 'dot': return `  ${me} ${sourceName(e.source)} 피해 ${e.damage}  HP ${hp(e.side, e.hp)}`;
     case 'heal': return `  ${me} ${josa(sourceName(e.source), '으로', '로')} ${e.amount} 회복  HP ${hp(e.side, e.hp)}`;
-    case 'stage': return e.change === 0
-      ? `  ${me} ${STAT_NAME[e.stat]} 변화 → ${e.stage > 0 ? '+' : ''}${e.stage}`
-      : `  ${me} ${STAT_NAME[e.stat]} ${e.change > 0 ? '+' : ''}${e.change} → ${e.stage > 0 ? '+' : ''}${e.stage}단계`;
-    case 'status': return `  ${me} ${STATUS_NAME[e.status]} ${e.stacks}중첩`;
+    case 'stage':   // change 0 = 시간이 지나거나 지워져서 단계가 바뀜
+      if (e.change !== 0) return `  ${me} ${STAT_NAME[e.stat]} ${e.change > 0 ? '+' : ''}${e.change} → ${e.stage > 0 ? '+' : ''}${e.stage}단계`;
+      return e.stage === 0 ? `  ${me} ${STAT_NAME[e.stat]} 원래대로` : `  ${me} ${STAT_NAME[e.stat]} 변화가 줄어 ${e.stage > 0 ? '+' : ''}${e.stage}단계`;
+    case 'status':  // 자연 감소는 로그에 쓰지 않고(화면의 칩으로 보임), 다 풀렸을 때만
+      if (e.halt) return null;
+      if (e.stacks === 0) return `  ${me}의 ${josa(STATUS_NAME[e.status], '이', '가')} 풀렸다`;
+      return e.decay ? null : `  ${me} ${STATUS_NAME[e.status]} ${e.stacks}중첩`;
     case 'sleep': return `  ${me} 잠들었다 (${sec(e.until - e.t)}초)`;
     case 'freeze': return `  ${me} 얼어붙었다 (${sec(e.until - e.t)}초)`;
     case 'recharge': return `  ${me} 반동으로 쉰다 (${sec(e.until - e.t)}초)`;

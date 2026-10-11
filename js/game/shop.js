@@ -6,14 +6,14 @@
 import {
   GRADES, GRADE_PRICE, BAG_PIECES, UNSELLABLE_BAGS, SELL_RATIO, START_MOVE_SELL, ROUND_GOLD, weakBonusGold, LINE_GOLD,
   SHOP_SLOTS, REFRESH_COST, REFRESH_STEP, KIND_WEIGHTS, LOW_SPACE_CELLS, LOW_SPACE_BAG_WEIGHT,
-  EARLY_MOVE_ROUNDS, EARLY_MOVE_SLOTS, MAX_MOVES, TYPE_MATCH_CHANCE, GRADE_ODDS, EVO_REFRESH_CHANCE,
+  EARLY_MOVE_ROUNDS, EARLY_MOVE_SLOTS, MAX_MOVES, TYPE_MATCH_CHANCE, GRADE_ODDS, EVO_REFRESH_CHANCE, UPGRADE, VITAMIN,
 } from '../config.js';
 import { MOVES } from '../data/moves.js';
 import { POKEMON } from '../data/pokemon.js';
 import { LEARNSETS } from '../data/learnsets.js';
 import { TYPES, TYPE_CHART } from '../data/typechart.js';
 import { ITEM_RULES } from '../rules/items.js';
-import { ownedIds, activeMoves, freeBagCells } from './bag.js';
+import { ownedIds, activeMoves, freeBagCells, moveLevel } from './bag.js';
 
 const MOVE_KEY = Object.fromEntries(Object.entries(MOVES).map(([k, m]) => [m.id, k]));
 const TYPE_LIST = Object.keys(TYPES);
@@ -30,10 +30,12 @@ export function priceOf(id) {
 // 판매가: 산 가격의 절반 (내림). 기본 가방, 진화 가방은 팔 수 없음(null). 시작 기술은 1골드.
 // 진화 도구는 등급이 없어 가격이 정해져 있지 않으므로 paid를 넘긴다.
 // paid: 산 가격을 따로 기억하는 물건 (진화 도구)
-export function sellPrice(id, startMove = null, paid = null) {
+// lv: 강화 단계. 도구+는 산 것 3개, 기술 +n은 n+1개 값으로 친다 (§10.3)
+export function sellPrice(id, startMove = null, paid = null, lv = 0) {
   if (UNSELLABLE_BAGS.includes(id)) return null;
-  if (startMove && id === `move:${startMove}`) return START_MOVE_SELL;
-  return Math.floor((paid ?? priceOf(id)) * SELL_RATIO);
+  const copies = lv ? (id.startsWith('item:') ? UPGRADE.itemMerge : lv) : 0;
+  if (startMove && id === `move:${startMove}`) return START_MOVE_SELL + Math.floor(priceOf(id) * copies * SELL_RATIO);
+  return Math.floor((paid ?? priceOf(id)) * (id.startsWith('item:') && lv ? copies : 1 + copies) * SELL_RATIO);
 }
 
 // 진화 계통에서 최종 진화형 BST 최댓값 (분기 진화는 가장 높은 것, §2.4)
@@ -56,12 +58,12 @@ export const refreshCost = (refreshes) => REFRESH_COST + Math.floor(refreshes / 
 
 // ---------- 후보 ----------
 
-// 도구 후보 (등급별). 타입 강화 도구 18종, 반감 열매 18종, 핀치 열매 5종은 표의 한 줄처럼 묶음 하나로 센다.
+// 도구 후보 (등급별). 타입 강화 도구 18종, 반감 열매 18종, 핀치 열매 5종은 표의 한 줄처럼 묶음 하나로 센다. 영양제는 따로 (rollSlot)
 const GROUPS = ['typeBoost', 'resistBerry', 'pinchBerry'];
 function itemPool(grade, evoUnlocked) {
   const pool = [];
   for (const [id, r] of Object.entries(ITEM_RULES)) {
-    if (r.grade !== grade || (r.evoOnly && !evoUnlocked)) continue;
+    if (r.grade !== grade || (r.evoOnly && !evoUnlocked) || r.kind === 'vitamin') continue;
     const entry = GROUPS.includes(r.kind) ? `group:${r.kind}` : `item:${id}`;
     if (!pool.includes(entry)) pool.push(entry);
   }
@@ -85,7 +87,10 @@ const weaknesses = (types) => TYPE_LIST.filter((a) => types.reduce((f, d) => f *
 
 // 묶음에서 하나 고르기: TYPE_MATCH_CHANCE 확률로 내게 맞는 것 중에서
 function fromGroup(rng, group, info) {
-  const ids = Object.entries(ITEM_RULES).filter(([, r]) => r.kind === group).map(([id]) => id);
+  let ids = Object.entries(ITEM_RULES).filter(([, r]) => r.kind === group).map(([id]) => id);
+  // 영양제: 최대로 먹은 능력치는 빼고 (§10.4)
+  if (group === 'vitamin') ids = ids.filter((id) => (info.boosts[ITEM_RULES[id].stat] ?? 0) < VITAMIN.max);
+  if (!ids.length) return null;
   const match = group === 'typeBoost' ? ids.filter((id) => info.moveTypes.has(ITEM_RULES[id].type))
     : group === 'resistBerry' ? ids.filter((id) => info.weak.includes(ITEM_RULES[id].type)) : [];
   return `item:${pick(rng, match.length && rng.chance(TYPE_MATCH_CHANCE) ? match : ids)}`;
@@ -99,6 +104,11 @@ function typeBag(rng, info) {
 // 한 칸 뽑기. 그 등급에 후보가 없으면 한 단계 아래 등급 (§12.3). 기술 후보가 아예 없으면 도구로.
 // kind 'attack'은 공격기만 (초반 보장 칸, §18.6)
 function rollSlot(rng, kind, info) {
+  // 영양제: 도구 칸마다 VITAMIN.shopChance 확률 (§10.4)
+  if (kind === 'item' && rng.chance(VITAMIN.shopChance)) {
+    const v = fromGroup(rng, 'vitamin', info);
+    if (v) return v;
+  }
   for (let g = rollGrade(rng, info.round); g >= 0; g--) {
     const grade = GRADES[g];
     if (kind === 'move' || kind === 'attack') {
@@ -146,11 +156,13 @@ export function rollShop(shop, ctx) {
   const info = {
     round,
     evoUnlocked: !!ctx.evoUnlocked,
-    // 현재 진화형 자신이 배울 수 있는 기술만 (§5.1). 가진 기술, 이미 상점에 있는 기술은 제외
-    moves: LEARNSETS[species].map((id) => MOVE_KEY[id]).filter((k) => !MOVES[k].excluded && !owned.includes(`move:${k}`)),
+    // 현재 진화형 자신이 배울 수 있는 기술만 (§5.1). 가진 기술은 강화용으로 나온다(최대 강화면 제외, §10.3). 이미 상점에 있는 기술은 제외
+    moves: LEARNSETS[species].map((id) => MOVE_KEY[id])
+      .filter((k) => !MOVES[k].excluded && (moveLevel(board, `move:${k}`) ?? -1) < UPGRADE.moveMaxLv),
     taken: new Set(slots.filter(Boolean).map((s) => s.id)),
     moveTypes: new Set(owned.filter((id) => id.startsWith('move:')).map((id) => MOVES[id.slice(5)].type)),
     weak: weaknesses(POKEMON[species].types),
+    boosts: ctx.boosts ?? {},
   };
 
   // 진화 도구: 종류 비율과 별개로 비어 있는 마지막 칸에 (§2.3)

@@ -2,17 +2,19 @@
 // 조작: 드래그(마우스·터치), 회전(R키·우클릭·회전 버튼), 판매(상점 영역으로 드래그 또는 판매 버튼), 누르면 상세 정보.
 import { h, dialog, toast } from './dom.js';
 import { portrait } from './sprites.js';
-import { typeChips } from './select.js';
+import { typeChips, evoLine } from './select.js';
 import {
-  GRADE, isStab, evoTarget, josa, thingName, thingGrade, thingColor, describe, pokemonName, abilityName, abilityDesc,
+  GRADE, isStab, evoTarget, josa, thingName, thingGrade, thingColor, describe, pokemonName, abilityName, abilityDesc, lvTag, upgradeLine, STAT_NAME,
 } from './labels.js';
-import { BOARD_W, BOARD_H, MAX_MOVES, MAX_LOSSES, WIN_TARGET, LEFTOVER_GOLD_WARN } from '../config.js';
+import { BOARD_W, BOARD_H, MAX_MOVES, MAX_LOSSES, WIN_TARGET, LEFTOVER_GOLD_WARN, VITAMIN } from '../config.js';
 import { cellsOf, key } from '../sim/snapshot.js';
+import { makeFighter, effectiveness } from '../sim/battle.js';
+import { TYPES } from '../data/typechart.js';
 import { POKEMON } from '../data/pokemon.js';
 import { ITEM_RULES } from '../rules/items.js';
 import { MOVES } from '../data/moves.js';
 import { LEARNSETS } from '../data/learnsets.js';
-import { activeMoves, isActive } from '../game/bag.js';
+import { activeMoves, activeItems, isActive, moveLevel } from '../game/bag.js';
 import { refreshCost, sellPrice } from '../game/shop.js';
 import * as runLib from '../game/run.js';
 
@@ -28,7 +30,9 @@ export function thingIcon(id) {
 }
 
 // 마우스를 올리면 보일 설명 (PC)
-const tip = (id, species) => { const d = describe(id, species); return [d.title, ...d.lines].join('\n'); };
+const tip = (id, species, lv = 0) => { const d = describe(id, species, lv); return [d.title, ...d.lines].join('\n'); };
+// 보드 위 강화 표시
+const lvBadge = (t) => (t.lv ? h('span', { class: 'lv-badge' }, lvTag(t.id, t.lv)) : null);
 
 // 상점·보관함 칸: 도구는 그림, 기술과 가방은 모양 미리보기
 function slotIcon(id) {
@@ -65,7 +69,47 @@ function evoPreview(run, itemId) {
       h('td', { class: sb[k] > sa[k] ? 'up' : sb[k] < sa[k] ? 'down' : '' }, sb[k] === sa[k] ? '' : `${sb[k] > sa[k] ? '+' : ''}${sb[k] - sa[k]}`)))),
     h('div', {}, `상점에 나올 수 있는 공격기 ${attackCount(run.species)} → ${attackCount(e.to)}개 (지금 가진 기술은 그대로)`),
     h('div', {}, '진화 가방 2×3을 받아요'),
-    h('div', {}, same ? `특성 ${abilityName(run.ability)} 유지` : '진화하면 특성을 다시 골라요'));
+    h('div', {}, same ? `특성 ${abilityName(run.ability)} 유지` : '진화하면 특성을 다시 골라요'),
+    // 최종 진화면 가방의 진화의휘석이 쓸모없어진다
+    runLib.evolutions(e.to).length === 0 && activeItems(run.board).some((it) => it.id === 'item:eviolite')
+      && h('div', { class: 'warn' }, '최종 진화라 가방의 진화의휘석은 효과가 없어져요'));
+}
+
+// 능력치 창: 종족값과 이번 라운드 전투 값(지금 가방 기준), 타입 상성, 특성, 진화
+function statsView(run) {
+  const mon = POKEMON[run.species];
+  const f = makeFighter('A', runLib.toSnapshot(run));
+  const st = f.build.pokemon.stats;   // 영양제 반영된 종족값
+  const rows = [
+    ['HP', st.hp, `최대 HP ${f.maxHp}`],
+    ['공격', st.atk, `물리 기술에 ${f.atk}`],
+    ['특공', st.spa, `특수 기술에 ${f.spa}`],
+    ['방어', Math.round(f.def), `방어 ${st.def}, 특방 ${st.spd}의 평균`],
+    ['스피드', st.spe, `충전 속도 ×${f.speedRate.toFixed(2)}`],
+  ];
+  // 전체에 걸리는 도구 효과 (받는 피해)
+  const taken = [
+    f.item.allTaken < 1 && `받는 피해 ×${f.item.allTaken.toFixed(2)} (진화의휘석)`,
+    f.item.specialTaken < 1 && `받는 특수 피해 ×${f.item.specialTaken.toFixed(2)} (돌격조끼)`,
+  ].filter(Boolean);
+  // 타입 상성: 받는 배율별로 묶기 (특성 무효 포함)
+  const groups = { 4: [], 2: [], 0.5: [], 0.25: [], 0: [] };
+  for (const t of Object.keys(TYPES)) groups[effectiveness(f, { type: t })]?.push(t);
+  const matchRow = (label, types) => types.length > 0 && h('div', { class: 'match-row' }, h('span', {}, label), typeChips(types));
+  return h('div', { class: 'stats-view' },
+    h('div', { class: 'detail-head' }, portrait(run.species, { shiny: run.shiny }),
+      h('div', {}, h('h2', {}, mon.name), typeChips(mon.types), h('div', { class: 'muted' }, `${run.round}라운드 전투 기준`))),
+    h('div', { class: 'stats' }, rows.map(([k, base, note]) => h('div', { class: 'stat' },
+      h('span', {}, k), h('span', { class: 'bar' }, h('i', { style: { width: `${Math.min(100, base / 1.5)}%` } })), h('b', {}, base),
+      h('small', { class: 'stat-note' }, note)))),
+    taken.map((t) => h('div', {}, t)),
+    // 영양제로 오른 종족값 (§10.4, 위 막대와 값에 이미 반영됨)
+    Object.keys(run.boosts ?? {}).length > 0 && h('div', {}, '영양제: ',
+      Object.entries(run.boosts).map(([s, n]) => `${STAT_NAME[s]} +${n * VITAMIN.amount}`).join(', ')),
+    h('div', { class: 'matchups' },
+      matchRow('4배', groups[4]), matchRow('2배', groups[2]), matchRow('절반', [...groups[0.5], ...groups[0.25]]), matchRow('무효', groups[0])),
+    h('p', {}, h('b', {}, `특성 ${abilityName(run.ability)} `), abilityDesc(run.ability)),
+    h('p', {}, h('b', {}, '진화 '), evoLine(run.species)));
 }
 
 // 인접 효과가 이어진 물건 uid 목록 (기술과 그 기술을 강화하는 도구)
@@ -101,9 +145,18 @@ export function render(root, app) {
     if (!r.ok) { toast(r.error); return false; }
     run = r.run;
     app.setRun(run);
+    // 강화 안내 (§10.3)
+    if (r.note?.upgraded) msg = `${thingName(r.note.upgraded)} ${lvTag(r.note.upgraded, r.note.lv)} 강화!`;
+    if (r.note?.merged) msg = `${thingName(r.note.merged)} 3개가 합쳐져 ${thingName(r.note.merged)}+가 됐어요`;
+    if (r.note?.vitamin) msg = `${thingName(r.note.vitamin)}: ${STAT_NAME[r.note.stat]} +${VITAMIN.amount} (${r.note.count}/${VITAMIN.max})`;
     if (msg) toast(msg);
     return true;
   };
+  // 상점 칸 기술이 가진 기술이면 다음 강화 단계 (아니면 null)
+  const nextLv = (s) => (s?.id.startsWith('move:') && moveLevel(run.board, s.id) !== null ? moveLevel(run.board, s.id) + 1 : null);
+  const upgrade = (i) => update(runLib.buy(run, i, { to: 'upgrade' })) && ((selected = null), draw());
+  // 영양제 칸인지 (§10.4)
+  const isVitamin = (s) => s?.id.startsWith('item:') && ITEM_RULES[s.id.slice(5)]?.kind === 'vitamin';
 
   // 진화 도구는 "이상한사탕 → 리자드"
   const slotName = (id) => {
@@ -124,7 +177,7 @@ export function render(root, app) {
   };
   const sell = (uid) => {
     const t = findOwned(uid);
-    const price = t && sellPrice(t.id, run.startMove, t.price);
+    const price = t && sellPrice(t.id, run.startMove, t.price, t.lv);
     if (update(runLib.sell(run, uid), price !== null && t ? `${thingName(t.id)} 판매 +${price}골드` : null)) { selected = null; draw(); }
   };
   const toStorage = (uid) => {
@@ -269,9 +322,11 @@ export function render(root, app) {
     const mon = POKEMON[run.species];
     const moves = activeMoves(run.board).length;
     return h('div', { class: 'hud' },
-      h('div', { class: 'hud-mon' }, portrait(run.species, { className: 'hud-portrait', shiny: run.shiny }),
+      // 누르면 능력치 창
+      h('div', { class: 'hud-mon', role: 'button', title: '능력치 보기', onclick: () => dialog('능력치', statsView(run), [{ label: '닫기', value: 0 }]) },
+        portrait(run.species, { className: 'hud-portrait', shiny: run.shiny }),
         h('div', {}, h('b', {}, mon.name), ' ', typeChips(mon.types),
-          h('div', { class: 'hud-ability', title: abilityDesc(run.ability) }, `특성 ${abilityName(run.ability)}`))),
+          h('div', { class: 'hud-ability' }, `특성 ${abilityName(run.ability)} · `, h('u', {}, '능력치 ▶')))),
       h('div', { class: 'hud-stats' },
         h('span', {}, `${run.round}라운드`),
         h('span', { class: 'gold' }, `${run.gold}골드`),
@@ -309,9 +364,9 @@ export function render(root, app) {
           left: `${x * cell}px`, top: `${y * cell}px`, width: `${cell}px`, height: `${cell}px`, background: color ?? '',
           borderWidth: `${edge(x, y - 1)} ${edge(x + 1, y)} ${edge(x, y + 1)} ${edge(x - 1, y)}`,
         },
-        title: tip(it.id, run.species),
+        title: tip(it.id, run.species, it.lv),
         onpointerdown: (ev) => beginPointer(ev, { from: 'own', uid: it.uid }, it.id, it.rot, [x - it.x, y - it.y]),
-      }, x === anchor[0] && y === anchor[1] ? thingIcon(it.id) : null));
+      }, x === anchor[0] && y === anchor[1] ? [thingIcon(it.id), lvBadge(it)] : null));
     });
     const grid = [];
     for (let y = 0; y < BOARD_H; y++) for (let x = 0; x < BOARD_W; x++) {
@@ -325,21 +380,21 @@ export function render(root, app) {
     h('div', { class: 'slots' }, run.board.storage.map((t, i) => h('div', {
       class: `slot${t && selected?.uid === t.uid ? ' selected' : ''}`,
       'data-storage': i,
-      title: t ? tip(t.id, run.species) : null,
+      title: t ? tip(t.id, run.species, t.lv) : null,
       onpointerdown: t ? (ev) => beginPointer(ev, { from: 'own', uid: t.uid }, t.id, 0, [0, 0]) : null,
-    }, t ? [slotIcon(t.id), h('small', {}, slotName(t.id))] : null))));
+    }, t ? [slotIcon(t.id), h('small', {}, slotName(t.id) + lvTag(t.id, t.lv)), lvBadge(t)] : null))));
 
   const shopView = () => h('div', { class: 'shop-area' },
     h('div', { class: 'label' }, '상점 ', h('small', {}, '(여기로 끌어오면 판매)')),
     h('div', { class: 'slots' }, run.shop.slots.map((s, i) => s
       ? h('div', {
-        class: `shop-slot${selected?.kind === 'shop' && selected.i === i ? ' selected' : ''}${s.evo ? ' evo' : ''}${s.price > run.gold ? ' expensive' : ''}`,
+        class: `shop-slot${selected?.kind === 'shop' && selected.i === i ? ' selected' : ''}${s.evo ? ' evo' : ''}${nextLv(s) ? ' upgrade' : ''}${s.price > run.gold ? ' expensive' : ''}`,
         style: { borderColor: GRADE[thingGrade(s.id)]?.color ?? '#f0d060', background: thingColor(s.id) ? `linear-gradient(${thingColor(s.id)}55, transparent)` : '' },
         title: tip(s.id, run.species),
         onpointerdown: (ev) => beginPointer(ev, { from: 'shop', i }, s.id, 0, [0, 0]),
       },
       slotIcon(s.id),
-      h('small', { class: 'slot-name' }, slotName(s.id)),
+      h('small', { class: 'slot-name' }, slotName(s.id), nextLv(s) && h('b', { class: 'up-tag' }, ` → +${nextLv(s)}`)),
       h('span', { class: 'price' }, `${s.price}G`),
       s.id.startsWith('move:') && isStab(MOVES[s.id.slice(5)], run.species) && h('span', { class: 'stab' }, '자속'),
       !s.evo && h('button', { class: `lock${s.locked ? ' on' : ''}`, title: '찜', onpointerdown: (ev) => ev.stopPropagation(), onclick: () => lock(i) }, s.locked ? '🔒' : '🔓'))
@@ -348,14 +403,21 @@ export function render(root, app) {
   const infoView = () => {
     const id = selectedId();
     if (!id) return h('div', { class: 'info muted' }, '물건을 누르면 자세한 정보가 보여요. 끌어서 놓고, R키·우클릭·회전 버튼으로 돌려요. 기술을 다른 기술 위에 놓으면 바꿔 끼워요.');
-    const d = describe(id, run.species);
     const own = selected.kind === 'own' ? findOwned(selected.uid) : null;
+    const d = describe(id, run.species, own?.lv ?? 0);
+    const up = selected.kind === 'shop' ? nextLv(run.shop.slots[selected.i]) : null;
     const inStorage = own && run.board.storage.some((t) => t?.uid === own.uid);
     const isEvoTool = id.startsWith('item:') && ITEM_RULES[id.slice(5)]?.placeable === false;
-    const sp = own ? sellPrice(own.id, run.startMove, own.price) : null;
+    const sp = own ? sellPrice(own.id, run.startMove, own.price, own.lv) : null;
+    const offBag = own && !inStorage && !id.startsWith('bag_') && !isActive(run.board, own);
     return h('div', { class: 'info' },
       h('b', {}, d.title), d.lines.map((l) => h('div', {}, l)),
+      offBag && h('div', { class: 'warn' }, '가방 위에 있지 않아서 효과가 없어요. 모든 칸을 가방 위에 놓으세요'),
+      up && h('div', { class: 'up-tag' }, `가진 기술이에요. 사면 ${upgradeLine(id, up)}`),
       h('div', { class: 'info-buttons' },
+        up && h('button', { class: 'primary', onclick: () => upgrade(selected.i) }, `강화 +${up} (${run.shop.slots[selected.i].price}골드)`),
+        selected.kind === 'shop' && isVitamin(run.shop.slots[selected.i]) && h('button', { class: 'primary', onclick: () => upgrade(selected.i) },
+          `먹이기 (${run.shop.slots[selected.i].price}골드, 지금 ${run.boosts?.[ITEM_RULES[id.slice(5)].stat] ?? 0}/${VITAMIN.max})`),
         own && !inStorage && h('button', { onclick: rotate }, '회전'),
         own && !inStorage && h('button', { onclick: () => toStorage(own.uid) }, '보관함으로'),
         own && isEvoTool && h('button', { class: 'primary', onclick: () => useEvolution(own.uid) }, '진화'),

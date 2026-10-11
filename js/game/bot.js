@@ -1,6 +1,6 @@
 // 싱글 플레이 상대 봇 (DESIGN §14, §15.2). run.js API로 플레이어와 같은 상점·경제 규칙을 따른다.
 // 구매 판단은 가치 / 가격 탐욕법, 배치는 인접 점수가 가장 높은 곳. 전략(strategy)은 가치에 배율을 준다.
-import { STARTER_POOL, BOSS_DIFFICULTY, BOARD_W, BOARD_H, MAX_MOVES, BOT_GOLD_MULT, BOT_MAX_REFRESH, BOT_REFRESH_RESERVE, BOT_SAME_TYPE_MULT, BOT_NORMAL_MULT, ITEM_STACK_WEIGHTS } from '../config.js';
+import { STARTER_POOL, BOSS_DIFFICULTY, UPGRADE, BOARD_W, BOARD_H, MAX_MOVES, BOT_GOLD_MULT, BOT_MAX_REFRESH, BOT_REFRESH_RESERVE, BOT_SAME_TYPE_MULT, BOT_NORMAL_MULT, ITEM_STACK_WEIGHTS } from '../config.js';
 import { MOVES } from '../data/moves.js';
 import { POKEMON } from '../data/pokemon.js';
 import { TYPE_CHART } from '../data/typechart.js';
@@ -87,6 +87,12 @@ function itemValue(id, ctx) {
     case 'expertBelt': v = 0.06 * total * weight; break;
     case 'blackSludge': v = POKEMON[species].types.includes('poison') ? 6 * weight : -5; break;
     case 'lightClay': v = moves.some((m) => m.family === 'screen') ? 3 : 0; break;
+    case 'vitamin': {   // 주로 쓰는 공격 능력치면 높게, 나머지는 조금 (§10.4)
+      const phys = attacks.filter((m) => m.class === 'physical').reduce((s, m) => s + attackPS(m, species), 0);
+      const spec = total - phys;
+      v = { atk: 0.15 * phys, spa: 0.15 * spec, hp: 3, def: 1.5, spd: 1.5, spe: 0.08 * total }[rule.stat];
+      break;
+    }
     case 'eviolite': v = canEvolve ? 10 * weight * (strategy.startsWith('noEvolve') ? 2 : 1) : 0; break;
     case 'resistBerry': {   // 내 약점일 때만 (4배면 더)
       const f = POKEMON[species].types.reduce((x, t) => x * (TYPE_CHART[rule.type]?.[t] ?? 1), 1);
@@ -201,6 +207,10 @@ function tryEvolve(run, strategy) {
 function tryBuy(run, i, strategy) {
   const slot = run.shop.slots[i];
   const id = slot.id;
+  if ((id.startsWith('move:') && bag.moveLevel(run.board, id) !== null) || ruleOf(id)?.kind === 'vitamin') {   // 강화, 영양제
+    const r = runLib.buy(run, i, { to: 'use' });
+    return r.ok ? r.run : null;
+  }
   let board = run.board;
   let soldGold = 0;
   // 기술이 4개 찼으면 가장 약한 기술을 빼고 넣는다 (§14)
@@ -240,7 +250,9 @@ function shopRound(run, strategy) {
         .map(({ s, i }) => {
           const id = s.id;
           let v;
-          if (id.startsWith('move:')) {
+          if (id.startsWith('move:') && bag.moveLevel(run.board, id) !== null) {
+            v = moveValue(moveOf(id), ctx) * UPGRADE.movePower * 1.5;   // 가진 기술 강화 (§10.3)
+          } else if (id.startsWith('move:')) {
             const m = moveOf(id);
             v = moveValue(m, ctx);
             if (ctx.moves.length >= MAX_MOVES) v -= Math.min(...ctx.moves.map((x) => moveValue(x, ctx)));

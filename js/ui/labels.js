@@ -6,9 +6,10 @@ import { TYPES } from '../data/typechart.js';
 import { ABILITIES as ABILITY_DATA } from '../data/abilities.js';
 import { ABILITIES } from '../rules/abilities.js';
 import { ITEM_RULES } from '../rules/items.js';
-import { ITEM, STATUS_MOVE_STACKS, AILMENT_MAP, AILMENT_CHANCE_DIV, EVERSTONE_GOLD } from '../config.js';
+import { ITEM, STATUS_MOVE_STACKS, AILMENT_MAP, AILMENT_CHANCE_DIV, EVERSTONE_GOLD, UPGRADE, VITAMIN } from '../config.js';
 import { priceOf } from '../game/shop.js';
 import { evolutions } from '../game/run.js';
+import { cellsOf } from '../sim/snapshot.js';
 
 export const TYPE_COLOR = {
   normal: '#9a9a7a', fire: '#e8742e', water: '#4f86e0', electric: '#e3c21c', grass: '#5ba844', ice: '#7ccfcf',
@@ -21,7 +22,7 @@ export const GRADE = {
 };
 export const STATUS_NAME = { poison: '독', burn: '화상', paralysis: '마비', chill: '냉기', drowsy: '졸음', confusion: '혼란' };
 export const STATUS_COLOR = { poison: '#9346a0', burn: '#e8742e', paralysis: '#e3c21c', chill: '#7ccfcf', drowsy: '#8f86e6', confusion: '#e4517d' };
-export const STAT_NAME = { atk: '공격', def: '방어', spa: '특공', spd: '특방', spe: '스피드', accuracy: '명중', evasion: '회피' };
+export const STAT_NAME = { hp: 'HP', atk: '공격', def: '방어', spa: '특공', spd: '특방', spe: '스피드', accuracy: '명중', evasion: '회피' };
 export const WEATHER_NAME = { sun: '쾌청', rain: '비', sand: '모래바람', snow: '설경' };
 const CLASS_NAME = { physical: '물리', special: '특수', status: '변화' };
 const BAG_NAME = { bag_base: '기본 가방', bag_evo: '진화 가방', bag_pouch: '작은 주머니', bag_2x2: '가방', bag_2x3: '큰 가방', bag_berry: '나무열매 바구니' };
@@ -68,6 +69,7 @@ const pct = (x) => `${Math.round(x * 100)}%`;
 function itemDesc(name) {
   const r = ITEM_RULES[name];
   switch (r.kind) {
+    case 'vitamin': return `사면 바로 ${STAT_NAME[r.stat]} 종족값 +${VITAMIN.amount} (가방에 놓지 않음, 진화해도 유지, 능력치마다 최대 ${VITAMIN.max}번)`;
     case 'typeBoost': return `인접한 ${typeName(r.type)} 기술 피해 +${pct(ITEM.typeBoost)}`;
     case 'choice': return `인접한 ${CLASS_NAME[r.cls]} 기술 피해 +${pct(ITEM.choiceBoost)}. 인접하지 않은 공격기 충전 속도 −${pct(ITEM.choicePenalty)}`;
     case 'scarf': return `인접한 기술 충전 속도 +${pct(ITEM.scarfCharge)}. 인접하지 않은 기술 피해 −${pct(ITEM.scarfPenalty)}`;
@@ -133,9 +135,27 @@ function moveFit(m, species) {
   return `${pokemonName(species)}의 ${stat} 사용${isStab(m, species) ? ' · 자속 ×1.25' : ''}`;
 }
 
+// 강화 표시 (§10.3): 도구+는 '+', 기술은 '+n'
+export const lvTag = (id, lv) => (!lv ? '' : id.startsWith('item:') ? '+' : `+${lv}`);
+
+// 강화 효과 한 줄
+export function upgradeLine(id, lv) {
+  if (!lv) return null;
+  if (id.startsWith('item:')) return `도구+: 효과 ×${UPGRADE.itemMult} (같은 도구 ${UPGRADE.itemMerge}개를 합침)`;
+  const m = MOVES[id.slice(5)];
+  return m.class === 'status'
+    ? `강화 +${lv}: 충전 속도 ×${(1 + UPGRADE.statusCharge * lv).toFixed(2)}`
+    : `강화 +${lv}: 1회 위력 ${Math.round(m.power1 * (1 + UPGRADE.movePower * lv))} (×${(1 + UPGRADE.movePower * lv).toFixed(1)})`;
+}
+
 // 툴팁: 제목과 줄 목록
 // species를 주면 기술에 "자속", "쓰는 능력치"를 덧붙인다
-export function describe(id, species = null) {
+export function describe(id, species = null, lv = 0) {
+  const d = describeBase(id, species);
+  return lv ? { title: d.title + lvTag(id, lv), lines: [upgradeLine(id, lv), ...d.lines] } : d;
+}
+
+function describeBase(id, species) {
   const price = priceOf(id);
   const grade = thingGrade(id);
   const head = [grade && GRADE[grade].name, price && `${price}골드`].filter(Boolean).join(' · ');
@@ -150,12 +170,14 @@ export function describe(id, species = null) {
   }
   if (id.startsWith('item:')) {
     const name = id.slice(5);
-    const size = ITEM_RULES[name].size ? `${ITEM_RULES[name].size}칸` : '진화 도구';
+    const size = ITEM_RULES[name].size ? `${ITEM_RULES[name].size}칸` : ITEM_RULES[name].kind === 'vitamin' ? '영양제' : '진화 도구';
     const to = evoTarget(id, species);
     const evoLine = to && `${pokemonName(species)} → ${josa(pokemonName(to), '으로', '로')} 진화`;
     return { title: thingName(id), lines: [[size, head].filter(Boolean).join(' · '), evoLine, itemDesc(name)].filter(Boolean) };
   }
   const bagLine = id.startsWith('bag_type_') ? `모든 칸이 이 가방 위인 ${typeName(id.slice(9))} 기술 충전 속도 +10%`
     : id === 'bag_berry' ? '안에 있는 열매의 발동 횟수 +1' : id === 'bag_base' || id === 'bag_evo' ? '팔 수 없음' : '물건을 놓을 칸';
-  return { title: thingName(id), lines: [head, bagLine].filter(Boolean) };
+  const cells = cellsOf(id, 0, 0, 0);
+  const size = `${Math.max(...cells.map((c) => c[0])) + 1}×${Math.max(...cells.map((c) => c[1])) + 1} (${cells.length}칸)`;
+  return { title: thingName(id), lines: [[size, head].filter(Boolean).join(' · '), bagLine] };
 }

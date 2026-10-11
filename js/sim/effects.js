@@ -37,8 +37,10 @@ export const stageMul = (n) => (n >= 0 ? 1 + STAGE_STEP * n : 1 / (1 + STAGE_STE
 
 // fromFoe: 상대가 거는 변화 (클리어바디가 하락을 막는다)
 export function addStages(ctx, f, stat, k, fromFoe = false) {
-  if (fromFoe && k < 0 && f.ability === 'clear-body') {
-    ctx.events.push({ t: ctx.t, side: f.side, type: 'ability', ability: 'clear-body' });
+  // 클리어바디(모두), 날카로운눈(명중), 부풀린가슴(방어): 상대가 거는 하락을 막는다
+  const guarded = f.ability === 'clear-body' || (f.ability === 'keen-eye' && stat === 'accuracy') || (f.ability === 'big-pecks' && stat === 'def');
+  if (fromFoe && k < 0 && guarded) {
+    ctx.events.push({ t: ctx.t, side: f.side, type: 'ability', ability: f.ability });
     return;
   }
   const cur = stage(f, stat);
@@ -63,7 +65,8 @@ export function clearStages(ctx, f) {
 // 명중률 보정 %p: 명중/회피 단계, 모래숨기
 export function accuracyMod(ctx, user, target) {
   const sandVeil = ctx.weather?.type === 'sand' && target.ability === 'sand-veil' ? ABILITY.sandVeilAcc : 0;
-  return (stage(user, 'accuracy') - stage(target, 'evasion')) * STAGE_ACC_STEP - sandVeil;
+  const evasion = user.ability === 'keen-eye' ? Math.min(0, stage(target, 'evasion')) : stage(target, 'evasion');   // 날카로운눈: 회피 상승 무시
+  return (stage(user, 'accuracy') - evasion) * STAGE_ACC_STEP - sandVeil;
 }
 export const noGuard = (user) => user.ability === 'no-guard';   // 내 기술만 반드시 명중 (원작은 양쪽, §13.4)
 
@@ -88,12 +91,22 @@ export function addStatus(ctx, f, status, n) {
   if (status === 'drowsy' && f.status.drowsy >= rule.max) halt(ctx, f, 'drowsy', SLEEP_MS, SLEEP_IMMUNE_MS, 'sleep');
 }
 
+// 상대(from)가 거는 상태이상. 싱크로면 독·화상·마비를 같은 중첩만큼 되돌려 준다
+export function inflict(ctx, from, f, status, n) {
+  const before = f.status[status];
+  addStatus(ctx, f, status, n);
+  if (f.ability === 'synchronize' && f.status[status] > before && ['poison', 'burn', 'paralysis'].includes(status)) {
+    ctx.events.push({ t: ctx.t, side: f.side, type: 'ability', ability: 'synchronize' });
+    addStatus(ctx, from, status, n);
+  }
+}
+
 function halt(ctx, f, status, ms, immuneMs, type) {
   f.status[status] = 0;
   f.immune[status] = ctx.t + ms + immuneMs;
   f.haltUntil = Math.max(f.haltUntil, ctx.t + ms);
   ctx.events.push({ t: ctx.t, side: f.side, type, until: ctx.t + ms });
-  ctx.events.push({ t: ctx.t, side: f.side, type: 'status', status, stacks: 0 });
+  ctx.events.push({ t: ctx.t, side: f.side, type: 'status', status, stacks: 0, halt: true });   // 잠듦/얼음으로 바뀌어 중첩이 0
 }
 
 export function clearStatus(ctx, f, status) {
@@ -127,10 +140,16 @@ export function tickTimers(ctx, f) {
   for (const [status, rule] of Object.entries(STATUS)) {
     if (rule.decayMs && f.status[status] > 0 && t % rule.decayMs === 0) {
       f.status[status]--;
-      ctx.events.push({ t, side: f.side, type: 'status', status, stacks: f.status[status] });
+      ctx.events.push({ t, side: f.side, type: 'status', status, stacks: f.status[status], decay: true });   // 자연 감소
     }
   }
   if (f.toxic && f.status.poison > 0 && t % TOXIC_ADD_MS === 0) addStatus(ctx, f, 'poison', 1);
+  // 가속: 5초마다 스피드 +1 (만료 없음, 최대 speedBoostMax)
+  if (f.ability === 'speed-boost' && t % ABILITY.speedBoostMs === 0 && (f.speedBoosts ?? 0) < ABILITY.speedBoostMax && stage(f, 'spe') < STAGE_MAX) {
+    f.speedBoosts = (f.speedBoosts ?? 0) + 1;
+    f.stages.push({ stat: 'spe', d: 1, until: Infinity });
+    ctx.events.push({ t, side: f.side, type: 'stage', stat: 'spe', change: 1, stage: stage(f, 'spe') });
+  }
   // 탈피: 2초마다 가장 많이 쌓인 상태이상 −2
   if (f.ability === 'shed-skin' && t % ABILITY.shedSkinMs === 0) {
     const [top, n] = Object.entries(f.status).reduce((a, b) => (b[1] > a[1] ? b : a));
@@ -151,6 +170,7 @@ export function tickWeather(ctx) {
 // 2. 지속 피해 (1초 경계에서만). 받는 피해 감소와 대타출동을 무시한다.
 export function tickDot(ctx, f, foe) {
   const dot = (source, ratio) => {
+    if (f.ability === 'magic-guard' && source !== 'fatigue') return 0;   // 매직가드: 피로만 받음
     const damage = Math.max(1, Math.round(f.maxHp * ratio));
     f.hp -= damage;
     ctx.events.push({ t: ctx.t, side: f.side, type: 'dot', source, damage, hp: f.hp });
@@ -165,6 +185,7 @@ export function tickDot(ctx, f, foe) {
   if (f.item.sludgeDamage) dot('black-sludge', f.item.sludgeDamage);
   if (ctx.t > FATIGUE_START_MS) dot('fatigue', FATIGUE_RATE * (ctx.t - FATIGUE_START_MS) / 1000);
   if (w === 'rain' && f.ability === 'rain-dish') heal(ctx, f, Math.round(f.maxHp * ABILITY.rainDish), 'rain-dish');
+  if (w === 'snow' && f.ability === 'ice-body') heal(ctx, f, Math.round(f.maxHp * ABILITY.iceBody), 'ice-body');
   if (f.item.leftovers) heal(ctx, f, Math.round(f.maxHp * f.item.leftovers), 'leftovers');
   if (f.item.sludgeHeal) heal(ctx, f, Math.round(f.maxHp * f.item.sludgeHeal), 'black-sludge');
 }
@@ -236,7 +257,7 @@ export function useStatusMove(ctx, user, target, move, id) {
     case 'sleep':
     case 'confuse': {
       const { toxic, ...stacks } = STATUS_MOVE_STACKS[id] ?? {};
-      for (const [status, n] of Object.entries(stacks)) addStatus(ctx, target, status, n);
+      for (const [status, n] of Object.entries(stacks)) inflict(ctx, user, target, status, n);
       if (toxic && target.status.poison > 0) target.toxic = true;
       for (const c of move.statChanges) addStages(ctx, target, c.stat, c.change, true);   // 뽐내기: 상대 공격 +2
       break;
@@ -279,6 +300,10 @@ export function useStatusMove(ctx, user, target, move, id) {
       ctx.events.push({ t, side: target.side, type: 'leech-seed', until: target.seedUntil });
       break;
     case 'taunt':
+      if (target.ability === 'oblivious') {   // 둔감: 도발 무효
+        ctx.events.push({ t, side: target.side, type: 'ability', ability: 'oblivious' });
+        break;
+      }
       target.tauntUntil = t + TAUNT_MS;
       ctx.events.push({ t, side: target.side, type: 'taunt', until: target.tauntUntil });
       break;

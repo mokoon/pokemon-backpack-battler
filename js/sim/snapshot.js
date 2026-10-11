@@ -1,5 +1,5 @@
 // 전투 입력 스냅샷 (DESIGN §11.4): 검사, 배치 계산, 인접, 발버둥(§4.4)
-import { BOARD_W, BOARD_H, MAX_MOVES, STRUGGLE, BOSS_BST } from '../config.js';
+import { BOARD_W, BOARD_H, MAX_MOVES, STRUGGLE, BOSS_BST, UPGRADE, VITAMIN } from '../config.js';
 import { MOVES } from '../data/moves.js';
 import { POKEMON } from '../data/pokemon.js';
 import { LEARNSETS } from '../data/learnsets.js';
@@ -75,7 +75,7 @@ function place(snap, errors) {
       errors.push(kind === 'item' && ITEM_RULES[id] ? `가방에 놓을 수 없는 도구: ${id}` : `알 수 없는 물건: ${it.id}`);
       continue;
     }
-    things.push({ kind, id, cells });
+    things.push({ kind, id, cells, lv: it.lv ?? 0 });
   }
   return { bags, things };
 }
@@ -88,6 +88,10 @@ export function validateSnapshot(snap) {
   if (!mon) return [`알 수 없는 포켓몬: ${snap.species}`];
   if (!Number.isInteger(snap.round) || snap.round < 1) errors.push(`잘못된 라운드: ${snap.round}`);
   if (snap.boss !== undefined && typeof snap.boss !== 'boolean') errors.push(`잘못된 보스 표시: ${snap.boss}`);
+  // 영양제 (§10.4): { 능력치: 1~VITAMIN.max }
+  for (const [stat, n] of Object.entries(snap.boosts ?? {})) {
+    if (!(stat in mon.stats) || !Number.isInteger(n) || n < 0 || n > VITAMIN.max) errors.push(`잘못된 영양제: ${stat} ${n}`);
+  }
   if (snap.ability != null && !mon.abilities.some((a) => a.id === snap.ability)) {
     errors.push(`이 포켓몬의 특성이 아님: ${snap.ability}`);
   }
@@ -109,6 +113,9 @@ export function validateSnapshot(snap) {
   const moveIds = [];
   for (const t of things) {
     if (!t.cells.every((c) => bagCells.has(key(c)))) errors.push(`가방 밖 배치: ${t.id}`);
+    // 강화 단계: 기술 0~moveMaxLv, 도구 0(보통) 또는 1(도구+) (§10.3)
+    const maxLv = t.kind === 'move' ? UPGRADE.moveMaxLv : 1;
+    if (!Number.isInteger(t.lv) || t.lv < 0 || t.lv > maxLv) errors.push(`잘못된 강화 단계: ${t.id} ${t.lv}`);
     for (const c of t.cells) {
       if (used.has(key(c))) errors.push(`물건끼리 겹침: ${t.id}`);
       used.add(key(c));
@@ -147,7 +154,7 @@ export function resolveBuild(snap) {
       }
     }
     const onBags = bags.filter((b) => t.cells.every((c) => b.keys.has(key(c)))).map((b) => b.id);
-    return { index: i, kind: t.kind, id: t.id, cells: t.cells, adj: [...adj].sort((a, b) => a - b), onBags };
+    return { index: i, kind: t.kind, id: t.id, lv: t.lv, cells: t.cells, adj: [...adj].sort((a, b) => a - b), onBags };
   });
 
   const moves = entries.filter((e) => e.kind === 'move').map((e) => ({ ...e, move: MOVES[e.id] }));
@@ -155,13 +162,21 @@ export function resolveBuild(snap) {
 
   return {
     species: snap.species,
-    pokemon: snap.boss ? bossPokemon(POKEMON[snap.species]) : POKEMON[snap.species],
+    pokemon: boosted(snap.boss ? bossPokemon(POKEMON[snap.species]) : POKEMON[snap.species], snap.boosts),
     ability: snap.ability ?? null,
     round: snap.round,
     entries,
     moves,
     items: entries.filter((e) => e.kind === 'item'),
   };
+}
+
+// §10.4 영양제: 먹은 수 × VITAMIN.amount를 그 종족값에 더한다
+function boosted(mon, boosts) {
+  if (!boosts) return mon;
+  const stats = { ...mon.stats };
+  for (const [stat, n] of Object.entries(boosts)) stats[stat] += n * VITAMIN.amount;
+  return { ...mon, stats };
 }
 
 // §2.5 보스: 종족값 합이 BOSS_BST가 되도록 각 종족값에 같은 비율을 곱한다

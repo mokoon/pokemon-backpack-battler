@@ -4,7 +4,7 @@ import { loadSprite, SpritePlayer } from './sprites.js';
 import { sfx } from './audio.js';
 import { loadSettings } from './settings.js';
 import { eventText } from './log.js';
-import { STATUS_NAME, STATUS_COLOR, STAT_NAME, WEATHER_NAME, TYPE_COLOR, pokemonName, moveName, abilityName, abilityDesc, thingColor } from './labels.js';
+import { STATUS_NAME, STATUS_COLOR, STAT_NAME, WEATHER_NAME, TYPE_COLOR, pokemonName, moveName, abilityName, abilityDesc, thingColor, lvTag } from './labels.js';
 import { portrait } from './sprites.js';
 import { typeChips } from './select.js';
 import { thingIcon } from './shop.js';
@@ -24,7 +24,7 @@ function chargeTracks(fighter, events, side) {
   return fighter.moves.map((m) => {
     const uses = events.filter((e) => e.type === 'use' && e.side === side && e.move === m.id).map((e) => e.t);
     const period = m.coolMs / fighter.speedRate;
-    return { id: m.id, init: Math.min(1, m.charge), uses, period };
+    return { id: m.id, lv: m.lv ?? 0, init: Math.min(1, m.charge), uses, period };
   });
 }
 function chargeAt(track, t) {
@@ -52,7 +52,7 @@ function miniBoard(snap, cell = 26) {
     return cells.map(([x, y]) => h('div', {
       class: `thing-cell ${it.id.startsWith('move:') ? 'is-move' : 'is-item'}`,
       style: { ...pos(x, y), background: thingColor(it.id) ?? '', borderWidth: `${edge(x, y - 1)} ${edge(x + 1, y)} ${edge(x, y + 1)} ${edge(x - 1, y)}` },
-    }, x === anchor[0] && y === anchor[1] ? thingIcon(it.id) : null));
+    }, x === anchor[0] && y === anchor[1] ? [thingIcon(it.id), it.lv ? h('span', { class: 'lv-badge' }, lvTag(it.id, it.lv)) : null] : null));
   });
   return h('div', { class: 'board mini-board', style: { width: `${BOARD_W * cell}px`, height: `${BOARD_H * cell}px` } }, grid, bags, things);
 }
@@ -99,7 +99,7 @@ export function render(root, app) {
       h('div', { class: 'gauges' }, tracks[s].map((tr) => {
         const bar = h('i', { style: { background: TYPE_COLOR[MOVES[tr.id]?.type] ?? '#aaa' } });
         gauges[s].push({ tr, bar });
-        return h('div', { class: 'gauge' }, h('span', {}, moveName(tr.id)), h('span', { class: 'gauge-bar' }, bar));
+        return h('div', { class: 'gauge' }, h('span', {}, moveName(tr.id) + lvTag(`move:${tr.id}`, tr.lv)), h('span', { class: 'gauge-bar' }, bar));
       })));
   };
 
@@ -117,7 +117,7 @@ export function render(root, app) {
     h('div', { class: 'dialog' },
       h('h3', {}, opp.boss ? '최종 보스!' : `${run.round}라운드 상대`),
       h('div', { class: 'detail-head' }, portrait(opp.species),
-        h('div', {}, h('h2', {}, who.B), typeChips(mon.types),
+        h('div', {}, h('h2', {}, `${opp.boss ? '보스 ' : ''}${pokemonName(opp.species)}`), typeChips(mon.types),
           h('div', { title: abilityDesc(opp.ability) }, `특성 ${abilityName(opp.ability)}`))),
       miniBoard(opp),
       h('p', {}, '기술: ', fighters.B.moves.map((m) => moveName(m.id)).join(', ')),

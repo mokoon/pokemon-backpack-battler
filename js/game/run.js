@@ -4,16 +4,17 @@
 // run = {
 //   seed, phase: 'select' | 'ability' | 'shop' | 'over' | 'cleared', started(첫 라운드를 시작했는지),
 //   candidates: [도감 번호 × 4], shinies: [이로치 여부 × 4], shiny, species, ability, abilitySlot, startMove, evoUnlockRound,
-//   round, gold, wins, losses, draws, history: ['win' | 'loss' | 'draw'],
+//   round, gold, wins, losses, draws, history: ['win' | 'loss' | 'draw'], boosts: { 능력치: 먹은 영양제 수 } (§10.4),
 //   board, shop, rolls(이번 라운드 상점 뽑기 횟수, 난수용), freeRefresh(이번 라운드 남은 무료 새로고침),
 // }
 import {
   STARTER_POOL, STARTER_CHOICES, BOSS_POOL, SHINY_CHANCE, WIN_TARGET, MAX_LOSSES, evoUnlockByLevel, EVO_UNLOCK_OTHER, EVO_UNLOCK_BABY,
-  EVO_PRICE, EVERSTONE_GOLD, ECONOMY_GOLD,
+  EVO_PRICE, EVERSTONE_GOLD, ECONOMY_GOLD, VITAMIN,
 } from '../config.js';
 import { POKEMON } from '../data/pokemon.js';
 import { createRng, hashSeed } from '../sim/rng.js';
 import { ABILITIES, selectable } from '../rules/abilities.js';
+import { ITEM_RULES } from '../rules/items.js';
 import * as bag from './bag.js';
 import * as shopLib from './shop.js';
 
@@ -70,7 +71,7 @@ export function createRun(seed) {
   const shinies = candidates.map((_, i) => createRng(hashSeed(seed, i, 7)).chance(SHINY_CHANCE));
   return {
     seed, phase: 'select', started: false, candidates, shinies, shiny: false, species: null, ability: null, abilitySlot: null, startMove: null,
-    evoUnlockRound: Infinity, round: 1, gold: 0, wins: 0, losses: 0, draws: 0, history: [],
+    evoUnlockRound: Infinity, round: 1, gold: 0, wins: 0, losses: 0, draws: 0, history: [], boosts: {},
     board: bag.createBoard(), shop: shopLib.createShop(), rolls: 0, freeRefresh: 0,
   };
 }
@@ -102,6 +103,7 @@ const shopCtx = (run, rolls) => ({
   round: run.round, species: run.species, board: run.board,
   // 진화의휘석/변함없는돌은 아직 진화할 수 있을 때만 (최종 진화 뒤에는 쓸모없음)
   evoUnlocked: run.round >= run.evoUnlockRound && evolutions(run.species).length > 0, evoItem: evoItem(run),
+  boosts: run.boosts ?? {},
 });
 
 function startRound(run) {
@@ -119,7 +121,11 @@ export const isBossRound = (run) => run.wins === WIN_TARGET - 1;
 
 export const battleSeed = (run) => hashSeed(run.seed, run.round, 2);
 
-export const toSnapshot = (run) => bag.toSnapshot(run.board, { species: run.species, ability: run.ability, round: run.round });
+export function toSnapshot(run) {
+  const snap = bag.toSnapshot(run.board, { species: run.species, ability: run.ability, round: run.round });
+  const boosts = Object.fromEntries(Object.entries(run.boosts ?? {}).filter(([, n]) => n > 0));
+  return Object.keys(boosts).length ? { ...snap, boosts } : snap;
+}
 
 // 전투 결과 기록 → 다음 라운드 또는 종료
 export function recordBattle(run, result) {
@@ -157,15 +163,36 @@ export function toggleLock(run, i) {
 }
 
 // 사서 target에 놓는다. 진화 도구는 { to: 'evolve' }(지금 진화) 또는 { to: 'storage', slot }(나중에)
+// 이미 가진 기술은 target과 상관없이 +1 강화 (§10.3). 같은 지닌 도구가 3개가 되면 도구+로 합친다.
+// 결과의 note: 화면에 보여 줄 안내 (강화, 합치기)
 export function buy(run, i, target) {
   const err = inShop(run);
   if (err) return err;
+  const id = run.shop.slots[i]?.id;
+  // 영양제: 사면 바로 그 종족값 +VITAMIN.amount (§10.4)
+  const vitamin = id?.startsWith('item:') && ITEM_RULES[id.slice(5)]?.kind === 'vitamin' && ITEM_RULES[id.slice(5)].stat;
+  if (vitamin) {
+    const n = run.boosts?.[vitamin] ?? 0;
+    if (n >= VITAMIN.max) return { ok: false, error: `이 능력치는 이미 최대(${VITAMIN.max}번)예요` };
+    const r = shopLib.buy(run.shop, i, run.gold);
+    if (!r.ok) return r;
+    const boosts = { ...run.boosts, [vitamin]: n + 1 };
+    return { ok: true, run: { ...run, shop: r.shop, gold: r.gold, boosts }, note: { vitamin: id, stat: vitamin, count: n + 1 } };
+  }
+  if (id?.startsWith('move:') && bag.moveLevel(run.board, id) !== null) {
+    const up = bag.upgradeMove(run.board, id);
+    if (!up.ok) return up;
+    const r = shopLib.buy(run.shop, i, run.gold);
+    return r.ok ? { ok: true, run: { ...run, shop: r.shop, gold: r.gold, board: up.board }, note: { upgraded: id, lv: up.lv } } : r;
+  }
   const r = shopLib.buy(run.shop, i, run.gold);
   if (!r.ok) return r;
   const next = { ...run, shop: r.shop, gold: r.gold };
   if (run.shop.slots[i].evo && target.to === 'evolve') return evolveWith(next, r.id);
   const placed = bag.add(run.board, r.id, target, run.shop.slots[i].evo ? { price: r.price } : {});
-  return placed.ok ? { ok: true, run: { ...next, board: placed.board } } : placed;
+  if (!placed.ok) return placed;
+  const merged = bag.mergeItems(placed.board, r.id, placed.uid);
+  return { ok: true, run: { ...next, board: merged ?? placed.board }, note: merged ? { merged: r.id } : null };
 }
 
 export function move(run, uid, target) {
@@ -190,7 +217,7 @@ export function sell(run, uid) {
   if (err) return err;
   const thing = [...run.board.bags, ...run.board.items, ...run.board.storage.filter(Boolean)].find((t) => t.uid === uid);
   if (!thing) return { ok: false, error: '없는 물건이에요' };
-  const price = shopLib.sellPrice(thing.id, run.startMove, thing.price);
+  const price = shopLib.sellPrice(thing.id, run.startMove, thing.price, thing.lv);
   if (price === null) return { ok: false, error: '팔 수 없는 가방이에요' };
   const r = bag.remove(run.board, uid);
   return { ok: true, run: { ...run, board: r.board, gold: run.gold + price } };

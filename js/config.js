@@ -1,7 +1,7 @@
 // 조정 가능한 모든 상수. DESIGN.md의 (초기값)들을 여기에만 둔다.
 
 // 시작 포켓몬 후보 (도감 번호, DESIGN §2.2 개발 초기 풀)
-export const STARTER_POOL = [4, 7, 1, 172, 92, 66, 74, 147, 440, 374];
+export const STARTER_POOL = [4, 7, 1, 172, 92, 66, 74, 147, 440, 374, 16, 63, 175, 255, 258, 387, 363, 246, 543, 280];
 // 최종 보스 후보 (§2.5): 뮤츠, 루기아, 레쿠쟈, 디아루가
 export const BOSS_POOL = [150, 249, 384, 483];
 export const BOSS_BST = 600;            // 보스 종족값 합을 이 값으로 맞춘다
@@ -96,7 +96,11 @@ export const LEECH_SEED_DOT = 0.008;
 export const TAUNT_MS = 3000;
 
 // 도구 (§10.2, §4.3)
-export const ITEM_STACK_WEIGHTS = [1, 0.8, 0.6, 0.4];   // 전체 효과 도구: n개째 효과 비율, 마지막 값 반복
+export const ITEM_STACK_WEIGHTS = [1, 0.8, 0.6, 0.4];
+// 강화 (§10.3): 같은 지닌 도구 3개 → 도구+ (효과 ×2), 가진 기술을 상점에서 또 사면 +1 (최대 +3)
+export const UPGRADE = { itemMerge: 3, itemMult: 2, moveMaxLv: 3, movePower: 0.2, statusCharge: 0.15 };
+// 영양제 (§10.4): 사면 바로 그 종족값 +amount (런 동안 유지, 진화해도 유지), 능력치마다 최대 max번
+export const VITAMIN = { amount: 10, max: 5, shopChance: 0.12 };   // shopChance: 도구 칸이 영양제가 될 확률   // 전체 효과 도구: n개째 효과 비율, 마지막 값 반복
 export const ITEM = {
   typeBoost: 0.20,          // 인접한 그 타입 기술 피해
   choiceBoost: 0.40,        // 구애머리띠/안경: 인접한 물리/특수 기술 피해
@@ -142,6 +146,11 @@ export const ABILITY = {
   cursedBody: 0.10,
   sereneGrace: 2,
   naturalCureAt: 0.5,
+  hustleMult: 1.5, hustleAcc: 0.8,          // 의욕: 물리 피해, 물리 명중률 배율
+  speedBoostMs: 10000, speedBoostMax: 2,    // 가속 (M6: 5초·4단계는 같은 포켓몬 다른 특성보다 40% 강했음)
+  thickFat: 0.5,                            // 두꺼운지방: 불꽃·얼음 받는 피해
+  iceBody: 0.01,                            // 아이스바디: 설경일 때 1초마다 회복
+  poisonPointStacks: 3,                     // 독가시
 };
 
 // 상점과 경제 (§12, §5.9, §4.3)
@@ -160,7 +169,7 @@ export const START_MOVE_SELL = 1;                             // 시작 기술 �
 export const ROUND_GOLD = [12, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15];   // 라운드 1~14, 그 뒤는 마지막 값
 export const weakBonusGold = (finalBst) => Math.max(0, Math.min(3, Math.floor((500 - finalBst) / 30)));   // §2.4
 // §2.4 계통 보정 골드 (밸런스 보고서로 맞춘 값, 계통 첫 단계 도감 번호 → 라운드마다 더할 골드). 표에 있으면 위 식 대신 쓴다
-export const LINE_GOLD = { 172: 4, 440: 2, 74: 5, 92: -3, 374: -2, 1: -1 };
+export const LINE_GOLD = { 66: 1, 172: 4, 440: 2, 74: 6, 92: -3, 374: -2, 1: -1, 363: 7, 16: 2, 246: 2, 7: -1, 258: -1, 175: -2, 4: -1, 280: 2 };
 export const SHOP_SLOTS = 5;
 export const REFRESH_COST = 1;
 export const REFRESH_STEP = 4;                                // 한 라운드에 4번 새로고침할 때마다 비용 +1

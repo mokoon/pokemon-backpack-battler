@@ -53,7 +53,7 @@ export function render(root, app) {
       h('h3', {}, '크레딧'),
       h('p', {}, '비공식 팬 게임입니다. 상업적으로 이용하지 않습니다.'),
       h('p', {}, 'Pokémon © Nintendo / Creatures Inc. / GAME FREAK inc.'),
-      h('p', {}, '게임 데이터: PokeAPI. 도구 아이콘: PokeAPI/sprites, Pokémon Showdown 아이콘(은밀망토, 요정의깃털). 효과음은 직접 합성.'),
+      h('p', {}, '게임 데이터: PokeAPI. 도구 아이콘: PokeAPI/sprites, Pokémon Showdown 아이콘(은밀망토, 요정의깃털). 효과음은 직접 합성. 글꼴: 갈무리(Galmuri, 이민서, SIL OFL 1.1).'),
       h('p', {}, '포켓몬 스프라이트와 초상화: PMD SpriteCollab 제작자들 (CC BY-NC 4.0). 이 게임에 나오는 포켓몬의 제작자:'),
       h('ul', { class: 'credit-list' }, Object.entries(CREDITS).map(([dex, c]) => h('li', {},
         h('b', {}, pokemonName(Number(dex))), ' — 스프라이트 ', join(c.sprite), ' · 초상화 ', join(c.portrait),

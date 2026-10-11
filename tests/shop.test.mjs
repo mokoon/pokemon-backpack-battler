@@ -24,9 +24,11 @@ const gradeOf = (id) => {
 };
 const ctxOf = (over = {}) => ({ rng: createRng(1), round: 1, species: 4, board: createBoard(), ...over });
 
-test('1만 번 새로고침: 배울 수 없는 기술, 이미 가진 기술, 같은 기술 두 칸이 나오지 않음', () => {
-  // 리자드: 할퀴기(가방), 불꽃세례(가방 밖), 화염방사(보관함)를 가짐. 진화 전(파이리)만 배우는 기술도 나오면 안 됨
+test('1만 번 새로고침: 배울 수 없는 기술, 최대 강화한 기술, 같은 기술 두 칸이 나오지 않음. 가진 기술은 강화용으로 나옴', () => {
+  // 리자드: 할퀴기(가방, +3 최대), 불꽃세례(가방 밖), 화염방사(보관함)를 가짐. 진화 전(파이리)만 배우는 기술도 나오면 안 됨
   const board = boardWith([['move:scratch', at(3, 2)], ['move:ember', at(0, 0)], ['move:flamethrower', { to: 'storage', slot: 0 }]]);
+  board.items.find((t) => t.id === 'move:scratch').lv = 3;
+  const seen = new Set();
   const learn = new Set(LEARNSETS[5]);
   const ctx = ctxOf({ rng: createRng(7), round: 6, species: 5, board });
   let shop = createShop();
@@ -39,10 +41,12 @@ test('1만 번 새로고침: 배울 수 없는 기술, 이미 가진 기술, 같
     for (const m of moves) {
       assert.ok(learn.has(MOVES[m].id), `배울 수 없는 기술 ${m}`);
       assert.ok(!MOVES[m].excluded, `제외 기술 ${m}`);
-      assert.ok(!['scratch', 'ember', 'flamethrower'].includes(m), `가진 기술 ${m}`);
+      assert.ok(m !== 'scratch', `최대 강화 기술 ${m}`);
+      seen.add(m);
     }
   }
   assert.ok(moveSlots > 10000);
+  assert.ok(seen.has('ember') && seen.has('flamethrower'));   // 가진 기술(최대 전)은 강화용으로 나옴
 });
 
 test('등급 확률: 라운드 1~2는 일반/고급만, 비율은 대략 75:25', () => {
@@ -150,10 +154,12 @@ test('가격과 판매가', () => {
   assert.equal(sellPrice('move:scratch', 'scratch'), 1);          // 시작 기술
 });
 
-test('라운드 골드 (§12.1) + 약한 포켓몬 보정 (§2.4)', () => {
-  assert.equal(roundGold(1, 4), 12);              // 리자몽 534 → 보정 0
-  assert.equal(roundGold(14, 4), 15);
-  assert.equal(roundGold(20, 4), 15);             // 14를 넘으면 14의 값
+test('라운드 골드 (§12.1) + 계통 보정 (§2.4)', () => {
+  assert.equal(roundGold(1, 147), 12);            // 망나뇽 600 → 보정 0, 표에 없음
+  assert.equal(roundGold(14, 147), 15);
+  assert.equal(roundGold(20, 147), 15);           // 14를 넘으면 14의 값
+  assert.equal(roundGold(1, 92), 12 - 3);         // 계통 보정 표: 고오스 −3
+  assert.equal(roundGold(1, 94), 12 - 3);         // 진화해도 같은 계통
   assert.equal(roundGold(1, 10), 12 + 3);         // 캐터피 → 버터플 395 → 3
 });
 

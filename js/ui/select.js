@@ -13,7 +13,7 @@ export const typeChips = (types) => h('span', { class: 'types' },
   types.map((t) => h('span', { class: 'type-chip', style: { background: TYPE_COLOR[t] } }, typeName(t))));
 
 // 진화 계통: 파이리 → 리자드 (3라운드) → 리자몽 (6라운드)
-function evoLine(species) {
+export function evoLine(species) {
   const parts = [pokemonName(species)];
   for (let s = species, e; (e = evolutions(s)[0]); s = e.to) parts.push(`${pokemonName(e.to)} (${e.unlock}라운드)`);
   return parts.join(' → ');

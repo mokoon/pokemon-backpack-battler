@@ -28,14 +28,14 @@ test('후보 4마리: 풀에서 서로 다르게, 같은 시드면 같은 후보
   assert.notDeepEqual(createRun(1).candidates, createRun(2).candidates);
 });
 
-test('시작: 특성 선택 → 1라운드 상점, 12골드, 시작 기술이 가방에', () => {
+test('시작: 특성 선택 → 1라운드 상점, 골드, , 시작 기술이 가방에', () => {
   let run = createRun(3);
   assert.equal(choosePokemon(run, 999).ok, false);
   run = ok(choosePokemon(run, run.candidates[0]));
   assert.equal(run.phase, 'ability');
   assert.equal(chooseAbility(run, 'intimidate').ok, false);
   run = startAs(4, 'blaze');
-  assert.deepEqual([run.phase, run.round, run.gold], ['shop', 1, 12]);
+  assert.deepEqual([run.phase, run.round, run.gold], ['shop', 1, 11]);   // 파이리 계통 보정 −1
   assert.deepEqual(activeMoves(run.board).map((m) => m.id), ['move:ember']);
   assert.equal(run.shop.slots.filter(Boolean).length, 5);
   assert.deepEqual(validateSnapshot(toSnapshot(run)), []);
@@ -97,7 +97,7 @@ test('변함없는돌이 가방에 있으면 진화 도구를 쓸 수 없고, �
   run = { ...run, board: add(run.board, 'item:everstone', { to: 'board', x: 4, y: 2, rot: 0 }).board };
   const gold = run.gold;
   run = ok(recordBattle(run, 'win'));
-  assert.equal(run.gold, gold + 9 + 3);
+  assert.equal(run.gold, gold + 9 - 1 + 3);   // 라운드 골드 − 계통 보정 + 변함없는돌
   run = ok(recordBattle(run, 'win'));                     // 3라운드: 이상한사탕
   assert.equal(buy(run, evoSlot(run), { to: 'evolve' }).error, '변함없는돌이 가방에 있어서 진화할 수 없어요');
   run = ok(buy(run, evoSlot(run), { to: 'storage', slot: 0 }));

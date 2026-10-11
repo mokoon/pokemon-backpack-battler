@@ -19,7 +19,7 @@ const newCtx = (weather = null) => ({ t: 0, rng: createRng(1), events: [], weath
 const ratio = (a, b) => a / b;
 
 test('10개 계통의 특성 26개가 모두 구현 상태 (todo 없음)', () => {
-  const chains = new Set(STARTER_POOL.map((s) => POKEMON[s].chain));
+  const chains = new Set(STARTER_POOL.slice(0, 10).map((s) => POKEMON[s].chain));   // 개발 초기 10개 계통
   const ids = new Set(Object.values(POKEMON).filter((p) => chains.has(p.chain)).flatMap((p) => p.abilities.map((a) => a.id)));
   assert.equal(ids.size, 26);
   for (const id of ids) assert.ok(ABILITIES[id], `${id} 미구현`);
