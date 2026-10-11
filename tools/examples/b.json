@@ -1,0 +1,18 @@
+{
+  "v": 1,
+  "species": 8,
+  "ability": "torrent",
+  "round": 5,
+  "bags": [
+    { "id": "bag_base", "x": 0, "y": 0, "rot": 0 },
+    { "id": "bag_2x3", "x": 3, "y": 0, "rot": 0 }
+  ],
+  "items": [
+    { "id": "move:water-pulse", "x": 0, "y": 0, "rot": 0 },
+    { "id": "item:mystic-water", "x": 2, "y": 0, "rot": 0 },
+    { "id": "move:bite", "x": 0, "y": 2, "rot": 0 },
+    { "id": "move:protect", "x": 3, "y": 0, "rot": 0 },
+    { "id": "item:rocky-helmet", "x": 3, "y": 1, "rot": 0 },
+    { "id": "item:occa-berry", "x": 2, "y": 2, "rot": 0 }
+  ]
+}

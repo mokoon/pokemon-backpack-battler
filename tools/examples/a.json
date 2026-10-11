@@ -1,0 +1,20 @@
+{
+  "v": 1,
+  "species": 5,
+  "ability": "blaze",
+  "round": 5,
+  "bags": [
+    { "id": "bag_base", "x": 0, "y": 0, "rot": 0 },
+    { "id": "bag_2x3", "x": 3, "y": 0, "rot": 0 },
+    { "id": "bag_type_fire", "x": 0, "y": 3, "rot": 0 }
+  ],
+  "items": [
+    { "id": "move:flamethrower", "x": 0, "y": 0, "rot": 0 },
+    { "id": "item:charcoal", "x": 1, "y": 0, "rot": 0 },
+    { "id": "move:slash", "x": 0, "y": 2, "rot": 0 },
+    { "id": "move:swords-dance", "x": 3, "y": 0, "rot": 0 },
+    { "id": "item:sitrus-berry", "x": 2, "y": 0, "rot": 0 },
+    { "id": "move:ember", "x": 0, "y": 3, "rot": 0 },
+    { "id": "item:leftovers", "x": 3, "y": 1, "rot": 1 }
+  ]
+}
